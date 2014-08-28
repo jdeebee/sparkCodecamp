@@ -1,3 +1,3 @@
-# Example Spark project
+sparkCodecamp
 
-See: <http://is.gd/runnigsparkinukko> and <http://is.gd/settingsparktoukko>
+Getting some useful info out of a dataset pertaining to World of Warcraft Auction Houses
