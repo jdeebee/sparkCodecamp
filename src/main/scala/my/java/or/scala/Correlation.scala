@@ -10,17 +10,24 @@ object Correlation {
     val appName = "World of Warcraft Auction Analyzer"
     val conf = new SparkConf().setAppName(appName)
     val sc = new SparkContext(conf)
-    val filePath = "/home/sadeqzad/Desktop/agg.csv"
+    val filePath = "/cs/taatto/scratch/jvd/data.csv"
       
     val (rddOfTuples, meanX, meanY, stdDevX, stdDevY) = init(sc, filePath, 9, 13)
-    
-    val correlation = corr(rddOfTuples, stdDevX, stdDevY)    
+        
+    // wrap our RDD in a broadcast variable to ship it only once to remote machines
+    // instead of shipping it every time we pass it to a function    
+    val broadcastRDD = sc.broadcast(rddOfTuples)    
+    // use cache() or persist() method to cache the RDD in remote machines' memory
+    // to speed up operations on the same RDD (the RDD will be read from memory instead of disk)
+    // which will cause a significant performance boost
+    broadcastRDD.value.cache()    
+    // use the "value" method of the broadcast variable to pass the RDD (and ship it only once to remote machines)
+    val correlation = corr(broadcastRDD.value, stdDevX, stdDevY)    
     println("\nPearson population correlation coefficient between variables 'current price' and '14-day today's projected price': " + correlation)
 
     val x = 300
-    val (yHat, r2) = predictY(x, rddOfTuples, meanX, meanY, stdDevX, stdDevY)       
-    println("\nFor x('14-day today's projected price')=" + x + ", we predict y(real price)=" + yHat)
-    println("The determinism coefficient of this linear regression (R^2)= " + r2)        
+    val (yHat, r2) = predictY(x, broadcastRDD.value, meanX, meanY, stdDevX, stdDevY)       
+    println("\nFor x('14-day today's projected price')=" + x + ", we predict y(real price)=" + yHat)        
     
     // after being done, stop the spark context
     sc.stop
@@ -30,12 +37,14 @@ object Correlation {
    * xCloumnIndex and yCloumnIndex are 1-based indices (not 0-based)
    * and are equal to the number of colons before the desired property + 1
    */
-  def init(sc: SparkContext, filePath: String, xColumnIndex: Int, yCloumnIndex: Int): Tuple5[org.apache.spark.rdd.RDD[(Double, Double)], Double, Double, Double, Double] = {
-    val mainRDD = sc.textFile(filePath)
+  def init(sc: SparkContext, filePath: String, xColumnIndex: Int, yCloumnIndex: Int): Tuple5[org.apache.spark.rdd.RDD[(Double, Double)], Double, Double, Double, Double] = {    
+    val mainRDD = sc.textFile(filePath)    
     val splitted = mainRDD.map(line => line.split(","))
     val selected = splitted.map(array => (array(xColumnIndex), array(yCloumnIndex)))
     val casted = selected.map(tuple => (tuple._1.toDouble, tuple._2.toDouble))
     val nonZeroRDDOfTuples = casted.filter(tuple => tuple._1 != 0 && tuple._2 != 0)
+    // since we use nonZeroRDDOfTuples several times below, we better cache it for performance
+    nonZeroRDDOfTuples.cache()
     val (meanX, meanY) = getMeans(nonZeroRDDOfTuples)
     val (stdDevX, stdDevY) = getStdDev(nonZeroRDDOfTuples, meanX, meanY)
     (nonZeroRDDOfTuples, meanX, meanY, stdDevX, stdDevY)
